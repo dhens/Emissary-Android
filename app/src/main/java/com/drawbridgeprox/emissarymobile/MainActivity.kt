@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
                     // TODO: Implement the actual logic to connect to the Drawbridge
                     // This is where you would typically make an API call or perform any necessary operations
                     // For demonstration purposes, we'll just display a Toast message
+                    // test
                     Toast.makeText(this, "Connecting to Drawbridge at $address", Toast.LENGTH_SHORT).show()
                 }
             )
