@@ -1,11 +1,15 @@
 package com.drawbridgeprox.emissarymobile
 
 import android.content.Context
+import android.net.Uri
 import android.os.Bundle
+import android.os.StatFs
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,10 +31,16 @@ import com.drawbridgeprox.emissarymobile.ui.theme.EmissaryMobileTheme
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.net.URL
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.KeyStore
 import java.security.cert.CertificateFactory
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
@@ -55,7 +65,6 @@ class MainActivity : ComponentActivity() {
 
     fun establishMTLSConnection(context: Context, drawbridgeAddress: String, drawbridgePort: Int, certificatePath: String) {
         try {
-
             // Load the CA certificate
             val caInputStream = FileInputStream(certificatePath)
             val certFactory = CertificateFactory.getInstance("X.509")
@@ -95,43 +104,6 @@ class MainActivity : ComponentActivity() {
             Log.e("MTLSHelper", "Error establishing mTLS connection", e)
         }
     }
-
-    fun downloadFile(context: Context, url: String, drawbridgeAddress: String): String? {
-        var filePath: String? = null
-        val thread = Thread {
-            try {
-
-                val drawbridgeBundleURL = URL(drawbridgeAddress)
-                val certFileURL = URL("$drawbridgeBundleURL/")
-                val connection = certFileURL.openConnection()
-                connection.connect()
-
-                val inputStream = connection.getInputStream()
-                val file = File(context.filesDir, "cert-ca.crt")
-                val outputStream = FileOutputStream(file)
-
-                val buffer = ByteArray(4096)
-                var bytesRead: Int
-                while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                    outputStream.write(buffer, 0, bytesRead)
-                }
-
-                outputStream.close()
-                inputStream.close()
-
-                filePath = file.absolutePath
-                Log.d("FileDownloader", "File downloaded successfully: $filePath")
-            } catch (e: Exception) {
-                Log.e("FileDownloader", "Error downloading file", e)
-            }
-        }
-
-        thread.start()
-        thread.join()
-
-        return filePath
-    }
-
 }
 
 @Preview(showBackground = true)
@@ -143,6 +115,16 @@ fun GreetingPreview() {
 @Composable
 fun DrawbridgeApp(connectToDrawbridge: (String) -> Unit) {
     val address = remember { mutableStateOf("") }
+    val context = LocalContext.current
+
+    val selectZipLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            uri?.let {
+                saveZipToAppDirectory(context, it)
+            }
+        }
+    )
 
     Column(
         modifier = Modifier.padding(16.dp)
@@ -160,5 +142,42 @@ fun DrawbridgeApp(connectToDrawbridge: (String) -> Unit) {
         ) {
             Text("Connect to Drawbridge")
         }
+
+        Button(
+            onClick = {
+                selectZipLauncher.launch(arrayOf("application/zip"))
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+        ) {
+            Text("Select ZIP")
+        }
+    }
+}
+
+private fun saveZipToAppDirectory(context: Context, uri: Uri) {
+    try {
+        val inputStream = context.contentResolver.openInputStream(uri)
+        val tempFile = Files.createTempFile(context.cacheDir.toPath(), "temp", ".zip")
+        Files.copy(inputStream, tempFile, StandardCopyOption.REPLACE_EXISTING)
+
+        val zipFile = ZipFile(tempFile.toFile())
+        val entries = zipFile.entries()
+
+        while (entries.hasMoreElements()) {
+            val entry = entries.nextElement()
+            val filePath = context.filesDir.toPath().resolve(entry.name)
+
+            if (!Files.exists(filePath)) {
+                Files.createDirectories(filePath.parent)
+                val inputStream = zipFile.getInputStream(entry)
+                Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING)
+                inputStream.close()
+            }
+        }
+
+        zipFile.close()
+        Files.delete(tempFile)
+    } catch (e: Exception) {
+        e.printStackTrace()
     }
 }
