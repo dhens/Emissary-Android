@@ -47,6 +47,9 @@ import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManagerFactory
 
 class MainActivity : ComponentActivity() {
+
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -104,6 +107,8 @@ class MainActivity : ComponentActivity() {
             Log.e("MTLSHelper", "Error establishing mTLS connection", e)
         }
     }
+
+
 }
 
 @Preview(showBackground = true)
@@ -114,8 +119,16 @@ fun GreetingPreview() {
 
 @Composable
 fun DrawbridgeApp(connectToDrawbridge: (String) -> Unit) {
-    val address = remember { mutableStateOf("") }
+    var address = remember { mutableStateOf("") }
     val context = LocalContext.current
+
+    val drawbridgeFile = context.filesDir.toPath().resolve("bundle/drawbridge.txt")
+    if (Files.exists(drawbridgeFile)) {
+        // TODO
+        // check if lookup is null - otherwise we can encounter runtime exception
+        address.value = Files.readAllLines(drawbridgeFile)[0]
+    }
+
 
     val selectZipLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -137,19 +150,19 @@ fun DrawbridgeApp(connectToDrawbridge: (String) -> Unit) {
         )
 
         Button(
-            onClick = { connectToDrawbridge(address.value) },
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
-        ) {
-            Text("Connect to Drawbridge")
-        }
-
-        Button(
             onClick = {
                 selectZipLauncher.launch(arrayOf("application/zip"))
             },
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
         ) {
-            Text("Select ZIP")
+            Text("Load Bundle ZIP")
+        }
+
+        Button(
+            onClick = { connectToDrawbridge(address.value) },
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+        ) {
+            Text("Connect to Drawbridge")
         }
     }
 }
