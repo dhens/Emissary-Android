@@ -167,8 +167,17 @@ private fun saveZipToAppDirectory(context: Context, uri: Uri) {
             val entry = entries.nextElement()
             val filePath = context.filesDir.toPath().resolve(entry.name)
 
-            if (!Files.exists(filePath)) {
-                Files.createDirectories(filePath.parent)
+            if (entry.isDirectory) {
+                if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
+                    Files.delete(filePath)
+                }
+                Files.createDirectories(filePath)
+            } else {
+                val parentPath = filePath.parent
+                if (Files.exists(parentPath) && !Files.isDirectory(parentPath)) {
+                    Files.delete(parentPath)
+                }
+                Files.createDirectories(parentPath)
                 val inputStream = zipFile.getInputStream(entry)
                 Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING)
                 inputStream.close()
