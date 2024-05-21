@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.os.StatFs
+import android.util.Base64
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -28,6 +29,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.drawbridgeprox.emissarymobile.ui.theme.EmissaryMobileTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
@@ -54,6 +58,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManagerFactory
+import kotlin.io.path.absolutePathString
 
 class MainActivity : ComponentActivity() {
 
@@ -64,101 +69,18 @@ class MainActivity : ComponentActivity() {
         setContent {
             EmissaryMobileTheme {}
             DrawbridgeApp(
-                connectToDrawbridge = { address ->
+                connectToDrawbridge = { context, address ->
                     // TODO: Implement the actual logic to connect to the Drawbridge
                     // This is where you would typically make an API call or perform any necessary operations
                     // For demonstration purposes, we'll just display a Toast message
                     // test
+                    establishMTLSConnection(context, address)
                     Toast.makeText(this, "Connecting to Drawbridge at $address", Toast.LENGTH_SHORT).show()
                 }
             )
         }
     }
 
-    fun establishMTLSConnection(context: Context, drawbridgeAddress: String) {
-        try {
-            // Load the CA certificate
-            val caFile = context.filesDir.toPath().resolve("put_certificates_and_key_from_drawbridge_zip_here/ca.crt")
-            val caInputStream = Files.newInputStream(caFile)
-            val certFactory = CertificateFactory.getInstance("X.509")
-            val caCert = certFactory.generateCertificate(caInputStream)
-            caInputStream.close()
-
-            // Load the client certificate
-            val clientCertFile = context.filesDir.toPath().resolve("put_certificates_and_key_from_drawbridge_zip_here/emissary-mtls-tcp.crt")
-            val clientCertInputStream = Files.newInputStream(clientCertFile)
-            val clientCert = certFactory.generateCertificate(clientCertInputStream)
-            clientCertInputStream.close()
-
-            // Load the client private key
-            val privateKeyFile = context.filesDir.toPath().resolve("put_certificates_and_key_from_drawbridge_zip_here/emissary-mtls-tcp.key")
-            val privateKeyInputStream = Files.newInputStream(privateKeyFile)
-            val privateKeyBytes = privateKeyInputStream.readBytes()
-            privateKeyInputStream.close()
-            val privateKey = KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(privateKeyBytes))
-
-            // Create a KeyStore containing the client certificate and private key
-            val keyStore = KeyStore.getInstance(KeyStore.getDefaultType())
-            keyStore.load(null, null)
-            keyStore.setCertificateEntry("client", clientCert)
-            keyStore.setKeyEntry("privateKey", privateKey, null, arrayOf(clientCert))
-
-            // Create a TrustManager that trusts the CA certificate
-            val tmfAlgorithm = TrustManagerFactory.getDefaultAlgorithm()
-            val tmf = TrustManagerFactory.getInstance(tmfAlgorithm)
-            tmf.init(keyStore)
-
-            // Create a KeyManager using the client certificate and private key
-            val kmfAlgorithm = KeyManagerFactory.getDefaultAlgorithm()
-            val kmf = KeyManagerFactory.getInstance(kmfAlgorithm)
-            kmf.init(keyStore, null)
-
-            // Create an SSLContext that uses our TrustManager and KeyManager
-            val sslContext = SSLContext.getInstance("TLS")
-            sslContext.init(kmf.keyManagers, tmf.trustManagers, null)
-
-            // Create an SSLSocketFactory from the SSLContext
-            val sslSocketFactory: SSLSocketFactory = sslContext.socketFactory
-            // once we support domain names, we need to find a better way to parse this
-            // as we could be doing unnecessary network io to DNS resolution.
-            val blah = InetAddress.getByName(drawbridgeAddress)
-            // Create an SSLSocket using the SSLSocketFactory
-            val addressAndPort = drawbridgeAddress.split(":")
-            Log.i("socket params", blah.address.toString())
-            val sslSocket = sslSocketFactory.createSocket(blah,  3100) as SSLSocket
-
-            // Configure the SSLSocket
-            val sslParameters = sslSocket.sslParameters
-            sslParameters.endpointIdentificationAlgorithm = "HTTPS"
-            sslSocket.sslParameters = sslParameters
-            sslSocket.startHandshake()
-            // Use the SSLSocket for communication
-            // Create input and output streams for the SSLSocket
-            val inputStream = sslSocket.inputStream
-            val outputStream = sslSocket.outputStream
-
-            // Create a BufferedReader to read responses from the server
-            val reader = BufferedReader(InputStreamReader(inputStream))
-
-            // Create a PrintWriter to send messages to the server
-            val writer = PrintWriter(OutputStreamWriter(outputStream), true)
-
-            // Send a message to the server
-            val message = "Hello, Drawbridge Server!"
-            writer.println(message)
-
-            // Read the response from the server
-            val response = reader.readLine()
-            Log.d("MTLSHelper", "Server response: $response")
-
-            // Close the streams and socket
-            reader.close()
-            writer.close()
-            sslSocket.close()
-        } catch (e: Exception) {
-            Log.e("MTLSHelper", "Error establishing mTLS connection", e)
-        }
-    }
 
 }
 
@@ -169,7 +91,7 @@ fun GreetingPreview() {
 }
 
 @Composable
-fun DrawbridgeApp(connectToDrawbridge: (String) -> Unit) {
+fun DrawbridgeApp(connectToDrawbridge: (Context, String) -> Unit) {
     var address = remember { mutableStateOf("") }
     val context = LocalContext.current
 
@@ -210,7 +132,7 @@ fun DrawbridgeApp(connectToDrawbridge: (String) -> Unit) {
         }
 
         Button(
-            onClick = { connectToDrawbridge(address.value) },
+            onClick = { connectToDrawbridge(context, address.value) },
             modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
         ) {
             Text("Connect to Drawbridge")
@@ -244,6 +166,7 @@ private fun saveZipToAppDirectory(context: Context, uri: Uri) {
                 Files.createDirectories(parentPath)
                 val inputStream = zipFile.getInputStream(entry)
                 Files.copy(inputStream, filePath, StandardCopyOption.REPLACE_EXISTING)
+                Log.i("writeFile", filePath.toString())
                 inputStream.close()
             }
         }
@@ -252,5 +175,103 @@ private fun saveZipToAppDirectory(context: Context, uri: Uri) {
         Files.delete(tempFile)
     } catch (e: Exception) {
         e.printStackTrace()
+    }
+}
+
+fun establishMTLSConnection(context: Context, drawbridgeAddress: String) {
+    CoroutineScope(Dispatchers.IO).launch {
+        try {
+            // Load the CA certificate
+            val caFile = context.filesDir.toPath().resolve("put_certificates_and_key_from_drawbridge_here/ca.crt")
+            Log.i("caFile", caFile.absolutePathString())
+            val caInputStream = Files.newInputStream(caFile)
+            val certFactory = CertificateFactory.getInstance("X.509")
+            val caCert = certFactory.generateCertificate(caInputStream)
+            caInputStream.close()
+
+            // Create a KeyStore containing the CA certificate
+            val keyStore = KeyStore.getInstance(KeyStore.getDefaultType())
+            keyStore.load(null, null)
+            keyStore.setCertificateEntry("caCert", caCert)
+
+            // Create a TrustManager that trusts the CA certificate
+            val tmfAlgorithm = TrustManagerFactory.getDefaultAlgorithm()
+            val tmf = TrustManagerFactory.getInstance(tmfAlgorithm)
+            tmf.init(keyStore)
+
+            // Load the client certificate
+            val clientCertFile = context.filesDir.toPath().resolve("put_certificates_and_key_from_drawbridge_here/emissary-mtls-tcp.crt")
+            val clientCertInputStream = Files.newInputStream(clientCertFile)
+            val clientCert = certFactory.generateCertificate(clientCertInputStream)
+            clientCertInputStream.close()
+
+            // Load the client private key in PKCS#8 format
+            val privateKeyFile = context.filesDir.toPath().resolve("put_certificates_and_key_from_drawbridge_here/emissary-mtls-tcp.key")
+            val privateKeyContent = Files.readAllLines(privateKeyFile).joinToString("\n")
+            val privateKeyPem = privateKeyContent
+                .replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "")
+                .replace("\\s".toRegex(), "")
+            val privateKeyDer = Base64.decode(privateKeyPem, Base64.DEFAULT)
+
+            // Convert to PKCS#8 format
+            val pkcs8EncodedKeySpec = PKCS8EncodedKeySpec(privateKeyDer)
+
+            // Generate the private key from PKCS#8 bytes
+            val privateKey = KeyFactory.getInstance("EC").generatePrivate(pkcs8EncodedKeySpec)
+
+            // Create a KeyStore containing the client certificate and private key
+            val clientKeyStore = KeyStore.getInstance(KeyStore.getDefaultType())
+            clientKeyStore.load(null, null)
+            clientKeyStore.setCertificateEntry("clientCert", clientCert)
+            clientKeyStore.setKeyEntry("privateKey", privateKey, null, arrayOf(clientCert))
+
+            // Create a KeyManager using the client certificate and private key
+            val kmfAlgorithm = KeyManagerFactory.getDefaultAlgorithm()
+            val kmf = KeyManagerFactory.getInstance(kmfAlgorithm)
+            kmf.init(clientKeyStore, null)
+
+            // Create an SSLContext that uses our TrustManager and KeyManager
+            val sslContext = SSLContext.getInstance("TLS")
+            sslContext.init(kmf.keyManagers, tmf.trustManagers, null)
+
+            // Create an SSLSocketFactory from the SSLContext
+            val sslSocketFactory: SSLSocketFactory = sslContext.socketFactory
+
+            // Split the address and port
+            val (address, port) = drawbridgeAddress.split(":").let {
+                it[0] to it[1].toInt()
+            }
+
+            // Create an SSLSocket using the SSLSocketFactory
+            val sslSocket = sslSocketFactory.createSocket(address, port) as SSLSocket
+
+            // Configure the SSLSocket
+            val sslParameters = sslSocket.sslParameters
+            sslParameters.endpointIdentificationAlgorithm = "HTTPS"
+            sslSocket.sslParameters = sslParameters
+            sslSocket.startHandshake()
+
+            // Use the SSLSocket for communication
+            val inputStream = sslSocket.inputStream
+            val outputStream = sslSocket.outputStream
+
+            // Send and receive a message to/from the server
+            val writer = outputStream.bufferedWriter()
+            val reader = inputStream.bufferedReader()
+
+            writer.write("Hello, Drawbridge Server!\n")
+            writer.flush()
+
+            val response = reader.readLine()
+            Log.d("MTLSHelper", "Server response: $response")
+
+            // Close the streams and socket
+            reader.close()
+            writer.close()
+            sslSocket.close()
+        } catch (e: Exception) {
+            Log.e("MTLSHelper", "Error establishing mTLS connection", e)
+        }
     }
 }
