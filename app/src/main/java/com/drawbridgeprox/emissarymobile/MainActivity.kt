@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.os.StatFs
-import android.util.Base64
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -21,6 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -28,16 +28,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.drawbridgeprox.emissarymobile.ui.theme.EmissaryMobileTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.BufferedWriter
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.util.Base64
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.io.PrintWriter
@@ -61,9 +65,6 @@ import javax.net.ssl.TrustManagerFactory
 import kotlin.io.path.absolutePathString
 
 class MainActivity : ComponentActivity() {
-
-
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -74,14 +75,14 @@ class MainActivity : ComponentActivity() {
                     // This is where you would typically make an API call or perform any necessary operations
                     // For demonstration purposes, we'll just display a Toast message
                     // test
-                    establishMTLSConnection(context, address)
-                    Toast.makeText(this, "Connecting to Drawbridge at $address", Toast.LENGTH_SHORT).show()
+                    // Use a coroutine scope to handle the network operation
+                    lifecycleScope.launch {
+                        establishMTLSConnection(context, address)
+                    }
                 }
             )
         }
     }
-
-
 }
 
 @Preview(showBackground = true)
@@ -92,14 +93,15 @@ fun GreetingPreview() {
 
 @Composable
 fun DrawbridgeApp(connectToDrawbridge: (Context, String) -> Unit) {
-    var address = remember { mutableStateOf("") }
+    val address = remember { mutableStateOf("") }
     val context = LocalContext.current
 
-    val drawbridgeFile = context.filesDir.toPath().resolve("bundle/drawbridge.txt")
-    if (Files.exists(drawbridgeFile)) {
-        // TODO
-        // check if lookup is null - otherwise we can encounter runtime exception
-        address.value = Files.readAllLines(drawbridgeFile)[0]
+    LaunchedEffect(Unit) {
+        val drawbridgeFile = context.filesDir.toPath().resolve("bundle/drawbridge.txt")
+        if (Files.exists(drawbridgeFile)) {
+            // Ensure the file is read only if it exists to avoid runtime exceptions
+            address.value = Files.readAllLines(drawbridgeFile).getOrElse(0) { "" }
+        }
     }
 
 
@@ -178,8 +180,8 @@ private fun saveZipToAppDirectory(context: Context, uri: Uri) {
     }
 }
 
-fun establishMTLSConnection(context: Context, drawbridgeAddress: String) {
-    CoroutineScope(Dispatchers.IO).launch {
+suspend fun establishMTLSConnection(context: Context, drawbridgeAddress: String) {
+    withContext(Dispatchers.IO) {
         try {
             // Load the CA certificate
             val caFile = context.filesDir.toPath().resolve("put_certificates_and_key_from_drawbridge_here/ca.crt")
@@ -212,7 +214,7 @@ fun establishMTLSConnection(context: Context, drawbridgeAddress: String) {
                 .replace("-----BEGIN PRIVATE KEY-----", "")
                 .replace("-----END PRIVATE KEY-----", "")
                 .replace("\\s".toRegex(), "")
-            val privateKeyDer = Base64.decode(privateKeyPem, Base64.DEFAULT)
+            val privateKeyDer = Base64.getDecoder().decode(privateKeyPem)
 
             // Convert to PKCS#8 format
             val pkcs8EncodedKeySpec = PKCS8EncodedKeySpec(privateKeyDer)
@@ -257,16 +259,19 @@ fun establishMTLSConnection(context: Context, drawbridgeAddress: String) {
             val outputStream = sslSocket.outputStream
 
             // Send and receive a message to/from the server
-            val writer = outputStream.bufferedWriter()
-            val reader = inputStream.bufferedReader()
+            val writer = BufferedWriter(OutputStreamWriter(outputStream))
+            val reader = BufferedReader(InputStreamReader(inputStream))
 
-            writer.write("Hello, Drawbridge Server!\n")
+            writer.write("PS_LIST")
+            writer.newLine() // Ensure the message is properly terminated
             writer.flush()
 
+            Log.d("MTLSHelper", "Waiting for server response")
             val response = reader.readLine()
             Log.d("MTLSHelper", "Server response: $response")
 
             // Close the streams and socket
+            Log.d("MTLSHelper", "Closing connection")
             reader.close()
             writer.close()
             sslSocket.close()
