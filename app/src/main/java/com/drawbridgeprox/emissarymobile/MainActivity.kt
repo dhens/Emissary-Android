@@ -151,7 +151,10 @@ fun DrawbridgeApp(connectToDrawbridge: (Context, String) -> Unit, options: List<
 
         LazyColumn {
             items(options) { option ->
-                val displayName = option.substring(3).trim()
+                val displayNameWithoutCommandSubstring = option.substringAfter("PS_LIST: ")
+                val portOffset = displayNameWithoutCommandSubstring.substring(0, 3).toInt()
+                val port = 10000 + portOffset
+                val displayName = displayNameWithoutCommandSubstring.substring(3).trim() + " @ localhost:${port}"
                 Text(text = displayName, modifier = Modifier.padding(vertical = 4.dp))
             }
         }
