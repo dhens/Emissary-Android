@@ -1,5 +1,6 @@
 # Emissary-Android
-![emsisary_android_scaledown](https://github.com/dhens/Emissary-Android/assets/11623868/ef17368d-6d3e-45f3-bdae-0096816d00ab)
+![emsisary_android_256](https://github.com/dhens/Emissary-Android/assets/11623868/c5c43044-b722-47dd-9413-fdf588c36cda)
+
 
 
 [Click here to quickly set up Drawbridge and Emissary](https://github.com/dhens/Drawbridge/wiki/Quick-Start-Up-Guide-%E2%80%90-Get-Drawbridge-and-Emissary-protecting-your-applications-%E2%80%90-v0.1.0%E2%80%90alpha)
