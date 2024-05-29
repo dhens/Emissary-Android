@@ -104,13 +104,17 @@ fun GreetingPreview() {
 
 @Composable
 fun DrawbridgeApp(connectToDrawbridge: (Context, String) -> Unit, options: List<String>) {
-    val address = remember { mutableStateOf("") }
     val context = LocalContext.current
+    val address = remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         val drawbridgeFile = context.filesDir.toPath().resolve("bundle/drawbridge.txt")
         if (Files.exists(drawbridgeFile)) {
-            address.value = Files.readAllLines(drawbridgeFile).getOrElse(0) { "" }
+            val readAddress = Files.readAllLines(drawbridgeFile).getOrElse(0) { "" }
+            Log.i("DrawbridgeApp", "Read address: $readAddress")
+            address.value = readAddress
+        } else {
+            Log.i("DrawbridgeApp", "drawbridge.txt file does not exist")
         }
     }
 
@@ -119,6 +123,13 @@ fun DrawbridgeApp(connectToDrawbridge: (Context, String) -> Unit, options: List<
         onResult = { uri ->
             uri?.let {
                 saveZipToAppDirectory(context, it)
+                // Trigger reading the file again after ZIP is loaded
+                val drawbridgeFile = context.filesDir.toPath().resolve("bundle/drawbridge.txt")
+                if (Files.exists(drawbridgeFile)) {
+                    val readAddress = Files.readAllLines(drawbridgeFile).getOrElse(0) { "" }
+                    Log.i("DrawbridgeApp", "Read address after zip: $readAddress")
+                    address.value = readAddress
+                }
             }
         }
     )
@@ -160,7 +171,6 @@ fun DrawbridgeApp(connectToDrawbridge: (Context, String) -> Unit, options: List<
         }
     }
 }
-
 private fun saveZipToAppDirectory(context: Context, uri: Uri) {
     try {
         val inputStream = context.contentResolver.openInputStream(uri)
@@ -256,7 +266,7 @@ fun setUpLocalServiceProxies(services: List<String>, localServiceProxies: Map<St
                         println("Accepted connection from ${clientSocket.inetAddress}")
 
                         thread {
-                            handleClientConnection(clientSocket, serviceString, drawbridgeAddress, tlsConfig)
+                            handleClientConnection(clientSocket, trimmedServiceString, drawbridgeAddress, tlsConfig)
                         }
                     } catch (e: IOException) {
                         e.printStackTrace()
